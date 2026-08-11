@@ -8,6 +8,11 @@ Script to create Figure 16 in the 2026 Kirk Bryan Field Trip guide (Shobe et al)
 Created Spring 2026
 
 @author: Charles Shobe, USFS Rocky Mountain Research Station
+
+README:
+    - This plotting script imports data from fieldguide_dz_data.parquet
+    - fieldguide_dz_data.parquet is produced by ReachAverageBedElevationChange.ipynb
+    - ReachAverageBedElevationChange.ipynb imports raw survey data archived in the dz_data folder
 """
 import numpy as np
 import matplotlib.pyplot as plt
