@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
-data = pd.read_parquet('charlie_fieldguide_dz_data.parquet')
+data = pd.read_parquet('dz_data/fieldguide_dz_data.parquet')
 data['category'] = data['reach'].str[:-2]
 
 ibm_palette = ['#ffb000', '#fe6100', '#dc267f', '#785ef0']
