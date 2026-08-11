@@ -1,0 +1,317 @@
+---
+title: "Elevenmile Canyon Dam Removal Macroinvert Analysis"
+subtitle: "PROVISIONAL"
+author: "George Valentine"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load libraries
+library(readxl)      # For reading in Excel files
+library(data.table)
+library(tidyverse)   # For tidy data management
+library(lubridate)   # For working with dates
+library(glmmTMB)     # For stat tests
+library(cowplot)     # For making gridded plots
+library(vegan)       # For NMDS analysis
+library(here)        # For relative file paths
+library(ggpattern)   # For using patterns in ggplot2
+library(goeveg)      # For checking how many NMDS dimensions are required
+library(ggforce)     # For plotting hulls on NMDS plots
+library(ggrepel)     # For text repel on plots
+```
+
+```{r loadData}
+# specify folder path where results are saved
+loadPath <- loadPath <- here::here("data","BMI_data_for_MMI_plot.xlsx")
+
+#----------------------------------------------------------------------------------
+# Load sample data
+macro_sampleData <- read_excel(loadPath,sheet = "Site & sample info")
+
+# make "Collection date" a date-type
+macro_sampleData$`Collection Date` <- date(macro_sampleData$`Collection Date`)
+
+# re-order the "Visit ID" column as a factor
+macro_sampleData$`Visit ID` <- factor(macro_sampleData$`Visit ID`,
+                                       levels = c("preremoval", "post-removal"))
+
+# Add a Before_After column based on Visit ID and order it
+macro_sampleData <- macro_sampleData %>% 
+  mutate(Before_After = case_when(`Visit ID` == "preremoval" ~ "Before",
+                                  `Visit ID` == "post-removal" ~ "After"))
+
+macro_sampleData$Before_After <- factor(macro_sampleData$Before_After,
+                                   levels = c("Before",
+                                              "After"))
+
+# Classify samples based on date and order as a factor
+macro_sampleData <- macro_sampleData %>%
+  mutate(Sample = case_when(`Collection Date` < '2023-9-1' ~ "Summer 2023",
+                            `Collection Date` > '2023-9-1' & `Collection Date` < '2023-12-31' ~ "Fall 2023",
+                            `Collection Date` > '2024-5-31' & `Collection Date` < '2024-9-1' ~ "Summer 2024",
+                            `Collection Date` > '2024-9-1' & `Collection Date` < '2024-12-31' ~ "Fall 2024",
+                            `Collection Date` > '2025-5-31' & `Collection Date` < '2025-9-1' ~ "Summer 2025",
+                            `Collection Date` > '2025-9-1' & `Collection Date` < '2025-12-31' ~ "Fall 2025"))
+
+macro_sampleData$Sample <- factor(macro_sampleData$Sample,
+                               levels = c("Summer 2023",
+                                          "Fall 2023",
+                                          "Summer 2024",
+                                          "Fall 2024",
+                                          "Summer 2025",
+                                          "Fall 2025"))
+
+# Add a "Season" variable
+macro_sampleData <- macro_sampleData %>% 
+  mutate(Season = case_when(`Collection Date` < '2023-12-31' ~ 2023,
+                            `Collection Date` > '2023-12-31' & `Collection Date` < '2024-12-31' ~ 2024,
+                            `Collection Date` > '2024-12-31' & `Collection Date` < '2025-12-31' ~ 2025))
+
+# rename and order sites as factor from upstream to downstream
+macro_sampleData <- macro_sampleData %>% 
+  mutate(Site = case_when(`Site ID` == "LkGeorge.CTRL_1" ~ "Control 1",
+                          `Site ID` == "LkGeorge.CTRL_2" ~ "Control 2",
+                          `Site ID` == "LkGeorge.CTRL_3" ~ "Control 3",
+                          `Site ID` == "LkGeorge.UPSTRM_1" ~ "Upstream 1",
+                          `Site ID` == "LkGeorge.UPSTRM_2" ~ "Upstream 2",
+                          `Site ID` == "LkGeorge.UPSTRM_3" ~ "Upstream 3",
+                          `Site ID` == "LkGeorge.DWNSTRM_1" ~ "Downstream 1",
+                          `Site ID` == "LkGeorge.DWNSTRM_2" ~ "Downstream 2",
+                          `Site ID` == "LkGeorge.DWNSTRM_3" ~ "Downstream 3"))
+
+macro_sampleData$Site <- factor(macro_sampleData$Site,
+                                    levels = c("Control 1",
+                                               "Control 2",
+                                               "Control 3",
+                                               "Upstream 1",
+                                               "Upstream 2",
+                                               "Upstream 3",
+                                               "Downstream 1",
+                                               "Downstream 2",
+                                               "Downstream 3"))
+
+# Make a Reach column and order it
+macro_sampleData <- macro_sampleData %>% 
+    mutate(Reach = case_when(`Site ID` == "LkGeorge.CTRL_1" ~ "Control",
+                          `Site ID` == "LkGeorge.CTRL_2" ~ "Control",
+                          `Site ID` == "LkGeorge.CTRL_3" ~ "Control",
+                          `Site ID` == "LkGeorge.UPSTRM_1" ~ "Upstream",
+                          `Site ID` == "LkGeorge.UPSTRM_2" ~ "Upstream",
+                          `Site ID` == "LkGeorge.UPSTRM_3" ~ "Upstream",
+                          `Site ID` == "LkGeorge.DWNSTRM_1" ~ "Downstream",
+                          `Site ID` == "LkGeorge.DWNSTRM_2" ~ "Downstream",
+                          `Site ID` == "LkGeorge.DWNSTRM_3" ~ "Downstream"))
+
+macro_sampleData$Reach <- factor(macro_sampleData$Reach,
+                                    levels = c("Control",
+                                               "Upstream",
+                                               "Downstream"))
+
+# Make a control/study column and order it
+macro_sampleData <- macro_sampleData %>% 
+  mutate(Control_Impact = case_when(`Site ID` == "LkGeorge.CTRL_1" ~ "Control",
+                          `Site ID` == "LkGeorge.CTRL_2" ~ "Control",
+                          `Site ID` == "LkGeorge.CTRL_3" ~ "Control",
+                          `Site ID` == "LkGeorge.UPSTRM_1" ~ "Impact",
+                          `Site ID` == "LkGeorge.UPSTRM_2" ~ "Impact",
+                          `Site ID` == "LkGeorge.UPSTRM_3" ~ "Impact",
+                          `Site ID` == "LkGeorge.DWNSTRM_1" ~ "Impact",
+                          `Site ID` == "LkGeorge.DWNSTRM_2" ~ "Impact",
+                          `Site ID` == "LkGeorge.DWNSTRM_3" ~ "Impact"))
+
+macro_sampleData$Control_Impact <- factor(macro_sampleData$Control_Impact,
+                                   levels = c("Control",
+                                              "Impact"))
+
+# Make a "Community" column to be used in the NMDS
+macro_sampleData <- macro_sampleData %>% 
+  mutate(Community = paste(Reach, Before_After))
+
+macro_sampleData$Community = factor(macro_sampleData$Community,
+                                    levels = c("Control Before",
+                                               "Control After",
+                                               "Upstream Before",
+                                               "Upstream After",
+                                               "Downstream Before",
+                                               "Downstream After"))
+
+#----------------------------------------------------------------------------------
+# Load multi-metric index data (CO MMI v5)
+macro_indices <- read_excel(loadPath, sheet = "Index results")
+macro_indices <- macro_indices %>%
+  filter(`Index Name` == "CO Ecological Data Application System Multimetric Index - Transition 2025")
+
+#----------------------------------------------------------------------------------
+# Load metrics data
+macro_metrics <- read_excel(loadPath, sheet = "Metrics")
+
+macro_metrics$`Sample ID` <- as.numeric(macro_metrics$`Sample ID`)
+
+# join macro_indices and macro_metrics to macro_sampleData to create a combined dataframe
+macro_data <- macro_sampleData %>% 
+  left_join(macro_indices, by = "Sample ID", suffix = c("", ".duplicate")) %>% 
+  left_join(macro_metrics, by = "Sample ID", suffix = c("", ".duplicate")) %>% 
+  select(-ends_with(".duplicate"))
+
+#----------------------------------------------------------------------------------
+# Add metrics for EPTs
+macro_data <- macro_data %>% 
+  mutate(`Density - EPT` = `Density - Ephemeroptera` + `Density - Plecoptera` + `Density - Trichoptera`,
+         `Unique Richness - EPT` = `Unique Richness - Ephemeroptera` + `Unique Richness - Plecoptera` + `Unique Richness - Trichoptera`)
+```
+
+
+# Filtering Data
+Consider filtering out samples collected in Fall 2023 and from all the Upstream 1 samples. The Fall 2023 sample was collected in early December, as soon as researchers had permission to re-enter the restoration site. Construction equipment was still in the river and the area was certainly not in a "post-restoration" state. The Upstream 1 site was slightly upstream of the dam impoundment, and so was not in the area affected by the dam removal. In a sense, it's more like a control reach than an impact reach because it didn't receive the treatment.
+```{r}
+# macro_data_filtered <- macro_data %>% 
+#   filter(Sample != "Fall 2023", #`Sample ID` != 215075,
+#          Site != "Upstream 1")
+macro_data_filtered <- macro_data %>% 
+  filter(! Sample == "Fall 2023", #`Sample ID` != 215075,
+         Site != "Upstream 1")
+```
+
+# MMI Plots
+The Colorado Ecological Data Application System Multimetric Index (MMI) is a bioassessment tool developed by the Colorado Water Quality Control Division with assistance from the US EPA to quantify the health of aquatic ecosystems within the state based on macroinvertebrate assemblages. It uses three Biotypes and assigns a score from 0-100. For more information, see the [Colorado Department of Public Health and the Environment's Policy Statement 10-1](https://drive.google.com/file/d/1Hj_ytnBJS2kF7T-e2uY6P1dfEvkEbmVS/view?usp=sharing), *Aquatic Life Use Attainment: Methodology to Determine Use Attainment for Rivers and Streams*. The study site in Elevenmile Canyon near lake George, CO falls within the *transition* biotype.
+
+MMI scores are assessed as follows:
+
+![Table 1 from Policy 10-1](../imgs/CO MMI v5 Thresholds table.png)
+
+![Table 3 from Policy 10-1](../imgs/CO MMI v5 High Scoring Thresholds table.png)
+
+How has the MMI score of each study reach (i.e. control, upstream, downstream) changed over the course of the study?
+```{r message=FALSE, warning=FALSE}
+# save a color palette
+ibm_palette <- c("#ffb000", "#fe6100","#dc267f","#785ef0","#648fff")
+
+# grayscale version of plot for Charlie's Lake George field guide
+macro_data_filtered %>%
+  ggplot(aes(x = Reach, y = `Index Score`, color = Sample)) +
+  stat_boxplot(geom = "errorbar") +
+  geom_boxplot(fill = "white") +
+  theme_classic() +
+  scale_color_grey() +
+  #scale_color_manual(values = ibm_palette) +
+  labs(x = "",
+       y = "Colorado MMI",
+       color = "") +
+  # labels
+  geom_hline(aes(yintercept = 33), linetype="dashed") +
+  geom_hline(aes(yintercept = 43), linetype="dashed") +
+  geom_hline(aes(yintercept = 53), linetype="dashed") +
+  geom_text(aes(x = "Control", y = 32), label = "Impairment", size = 3, color = "black", nudge_x = -0.4) +
+  geom_text(aes(x = "Control", y = 44), label = "Attainment", size = 3, color = "black", nudge_x = -0.4) +
+  geom_text(aes(x = "Control", y = 54), label = "High-scoring", size = 3, color = "black", nudge_x = -0.38)
+
+#save plot if necessary
+ # ggsave(filename = "CMS_LakeGeorge_MMIboxplot_6.26.2026.png",
+ #        width = 11,
+ #        height = 7.5,
+ #        scale = 0.7,
+ #        units = "in",
+ #        dpi = 600)
+ # ggsave(filename = "CMS_LakeGeorge_MMIboxplot_6.26.2026.eps",
+ #        width = 11,
+ #        height = 7.5,
+ #        scale = 0.7,
+ #        units = "in",
+ #        dpi = 1000)
+```
+
+# Non-Metric Multi Dimensional Scaling (NMDS)
+ NMDS is a method that allows us to consolidate multidimensional data (in our case, many OTUs) into a 2D or 3D representation of community structure and/or change between communities. In our case, in addition to treating Control, Upstream, and Downstream as separate communities, we also treat the Before and After states of these reaches as separate communities.
+ 
+ More info and further instructions at [https://jonlefcheck.net/2012/10/24/nmds-tutorial-in-r/] and [https://jkzorz.github.io/2019/06/06/NMDS.html] and [https://library.virginia.edu/data/articles/starting-non-metric-multidimensional-scaling-nmds].
+ 
+```{r NMDS, message=FALSE}
+set.seed(1234) # set seed to ensure reproduceable results
+
+# Load the OTU matrix that has been helpfully provided for us
+loadPath <- loadPath <- here::here("data","BMI_data_for_NMDS_plot.xlsx") # delete this line later
+macro_taxaMatrix <- read_excel(loadPath,sheet = "Taxa matrix")
+
+# the metaMDS tool in the "Vegan" package requires a matrix object with species/taxa/OTUs as columns and communities as rows
+# we must first transpose the dataframe and then convert to a matrix
+colnames <- macro_taxaMatrix$`OTU Name`
+macro_taxaMatrix <- as.data.frame(t(macro_taxaMatrix)[-1,])
+colnames(macro_taxaMatrix) <- colnames
+macro_taxaMatrix <- macro_taxaMatrix %>% 
+  mutate_if(is.character, as.numeric) %>% 
+  rownames_to_column("Sample ID") %>%
+  arrange(`Sample ID`) %>% # sort rows
+  column_to_rownames("Sample ID")
+
+# Filter out sample IDs that correspond to Upstream 1 and Fall 2023 - the ones that we are filtering out.
+filter_samples <- macro_sampleData %>% 
+  filter(Sample == "Fall 2023" | Site == "Upstream 1") %>% 
+  select(`Sample ID`)
+  
+macro_taxaMatrix <- macro_taxaMatrix[!rownames(macro_taxaMatrix) %in% filter_samples$`Sample ID`,]
+
+
+# How many dimensions should our NMDS be?
+dimcheckMDS(macro_taxaMatrix,
+              distance = "bray",
+              k = 6)
+
+# Calculate nmds with 2 dimensions
+macro_nmds <- metaMDS(macro_taxaMatrix, 
+                      distance = "bray",
+                      tidy = T, k = 2) # uses defaults of 2 dimensions and Bray-Curtis distances
+macro_nmds # increasing to 3 dimensions lowers our stress value. Make this change if needed.
+stressplot(macro_nmds)
+```
+Our stress value with two dimensions is fair, but not great. We're aiming for a stress value of <0.1 but <0.2 is acceptable. The stress value improves when we change to three dimensions, but that comes at the cost of some interpretability when we plot. Let's leave it at two dimensions.
+ 
+ Let's plot our NMDS
+```{r message=FALSE, warning=FALSE}
+
+# get convex hulls and their centroids
+nmds_communityHulls <- nmds_communityScores %>% 
+  group_by(Community) %>% 
+  slice(chull(NMDS1,NMDS2))
+
+nmds_communityCentroids <- nmds_communityScores %>% 
+  group_by(Community, Reach, Before_After) %>% 
+  summarise(axis1 = mean(NMDS1),
+            axis2 = mean(NMDS2))
+
+
+# Plot just community hulls
+ggplot() +
+  # plot communities
+  geom_point(data = nmds_communityScores,
+             aes(x = NMDS1, y = NMDS2, colour = Reach)) +
+  # plot hulls
+  geom_polygon(data = nmds_communityHulls,
+               aes(x = NMDS1, y = NMDS2, fill = Reach, group = Community),
+               alpha = 0.3) +
+  # plot centroids
+  geom_point(data = nmds_communityCentroids,
+             aes(x = axis1, y = axis2, color = Reach, shape = Before_After),
+             size = 5) +
+      # plot vectors
+  # geom_segment(data = macro_nmds_spp_coords,
+  #              aes(x = 0, y = 0,
+  #                  xend = NMDS1, yend = NMDS2),
+  #              colour = "grey30") +
+  # geom_text_repel(data = macro_nmds_spp_coords, 
+  #           aes(x = NMDS1, y = NMDS2), 
+  #           label = row.names(macro_nmds_spp_coords),
+  #           size = 3, 
+  #           colour = "grey30") +
+  scale_color_manual(values = ibm_palette[c(1,3,5)]) +
+  scale_fill_manual(values = ibm_palette[c(1,3,5)]) +
+  scale_shape_manual(values=c(66, 65)) +
+  labs(shape = "") +
+  theme_classic() +
+  theme(axis.text = element_blank(),
+  axis.ticks = element_blank())
+
+```
