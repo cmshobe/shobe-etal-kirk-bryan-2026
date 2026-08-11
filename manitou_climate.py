@@ -27,7 +27,7 @@ text_y = 0.84
 ####import USFS climate data from Manitou Experimental Forest 
 ####(used to generate temperature plot (panel A))
 
-file_name = 'MEF_Met_2025_QAQCd_v2.csv'
+file_name = 'manitou_climate_data/MEF_airtemp_data.csv'
 
 # Define the data types for specific columns
 data_types = {
@@ -71,7 +71,7 @@ MAT.text(text_x, text_y, 'A', transform=MAT.transAxes, fontsize = 20, zorder = 1
 ####(used to generate precipitation plots (panels B-D))
 
 #new, weeks-aggregated code
-file_name = 'NTN-co21-w-s-mg.csv'
+file_name = 'manitou_climate_data/NTN-co21-w-s-mg.csv'
 data_weekly = pd.read_csv(str(file_name), header = 0)
 data_weekly['yearmonth_datetime'] = pd.to_datetime(data_weekly['yrmonth'], 
                                                    format = '%Y%m')
